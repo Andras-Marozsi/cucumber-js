@@ -40,7 +40,11 @@ function parseStep({
     out.sourceLocation = testStep.sourceLocation
     out.text = pickleStep.text
   } else {
-    out.keyword = isBeforeHook ? 'Before' : 'After'
+    if (testStep.hookDefinitionKeyword) {
+      out.keyword = testStep.hookDefinitionKeyword
+    } else {
+      out.keyword = isBeforeHook ? 'Before' : 'After'
+    }
   }
   if (pickleStep) {
     const iterator = buildStepArgumentIterator({

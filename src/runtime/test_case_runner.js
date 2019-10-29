@@ -35,11 +35,19 @@ export default class TestCaseRunner {
       attach: ::attachmentManager.create,
       parameters: worldParameters,
     })
+    this.beforeStepHookDefinitions = this.getBeforeStepHookDefinitions()
+    this.afterStepHookDefinitions = this.getAfterStepHookDefinitions()
     this.beforeHookDefinitions = this.getBeforeHookDefinitions()
     this.afterHookDefinitions = this.getAfterHookDefinitions()
+    const testStepCount = this.testCase.pickle.steps.length
+    const beforeStepsCount =
+      this.beforeStepHookDefinitions.length * testStepCount
+    const afterStepsCount = this.afterStepHookDefinitions.length * testStepCount
     this.maxTestStepIndex =
       this.beforeHookDefinitions.length +
-      this.testCase.pickle.steps.length +
+      beforeStepsCount +
+      testStepCount +
+      afterStepsCount +
       this.afterHookDefinitions.length -
       1
     this.testCaseSourceLocation = {
@@ -77,9 +85,17 @@ export default class TestCaseRunner {
     const steps = []
     this.beforeHookDefinitions.forEach(definition => {
       const actionLocation = { uri: definition.uri, line: definition.line }
-      steps.push({ actionLocation })
+      const data = { actionLocation }
+      data.hookDefinitionKeyword = 'Before'
+      steps.push(data)
     })
     this.testCase.pickle.steps.forEach(step => {
+      this.beforeStepHookDefinitions.forEach(definition => {
+        const actionLocation = { uri: definition.uri, line: definition.line }
+        const data = { actionLocation }
+        data.hookDefinitionKeyword = 'BeforeStep'
+        steps.push(data)
+      })
       const actionLocations = this.getStepDefinitions(step).map(definition => ({
         uri: definition.uri,
         line: definition.line,
@@ -93,10 +109,18 @@ export default class TestCaseRunner {
         data.actionLocation = actionLocations[0]
       }
       steps.push(data)
+      this.afterStepHookDefinitions.forEach(definition => {
+        const actionLocation = { uri: definition.uri, line: definition.line }
+        const data = { actionLocation }
+        data.hookDefinitionKeyword = 'AfterStep'
+        steps.push(data)
+      })
     })
     this.afterHookDefinitions.forEach(definition => {
       const actionLocation = { uri: definition.uri, line: definition.line }
-      steps.push({ actionLocation })
+      const data = { actionLocation }
+      data.hookDefinitionKeyword = 'After'
+      steps.push(data)
     })
     this.emit('test-case-prepared', { steps })
   }
@@ -109,6 +133,18 @@ export default class TestCaseRunner {
 
   getBeforeHookDefinitions() {
     return this.supportCodeLibrary.beforeTestCaseHookDefinitions.filter(
+      hookDefinition => hookDefinition.appliesToTestCase(this.testCase)
+    )
+  }
+
+  getBeforeStepHookDefinitions() {
+    return this.supportCodeLibrary.beforeTestStepHookDefinitions.filter(
+      hookDefinition => hookDefinition.appliesToTestCase(this.testCase)
+    )
+  }
+
+  getAfterStepHookDefinitions() {
+    return this.supportCodeLibrary.afterTestStepHookDefinitions.filter(
       hookDefinition => hookDefinition.appliesToTestCase(this.testCase)
     )
   }
@@ -226,6 +262,28 @@ export default class TestCaseRunner {
     })
   }
 
+  async runStepHooks(step, isBeforeHook) {
+    let stepHooks = []
+    const stepInfo = {
+      text: step.text,
+      arguments: step.arguments,
+      location: Object.assign({ uri: this.testCase.uri }, step.locations[0]),
+    }
+    if (isBeforeHook) {
+      stepHooks = this.beforeStepHookDefinitions
+    } else {
+      stepHooks = this.afterStepHookDefinitions
+    }
+    await Promise.each(stepHooks, async stepHook => {
+      await this.aroundTestStep(async () => {
+        if (this.isSkippingSteps()) {
+          return { status: Status.SKIPPED }
+        }
+        return this.invokeStep(null, stepHook, stepInfo)
+      })
+    })
+  }
+
   async runStep(step) {
     const stepDefinitions = this.getStepDefinitions(step)
     if (stepDefinitions.length === 0) {
@@ -243,7 +301,9 @@ export default class TestCaseRunner {
 
   async runSteps() {
     await Promise.each(this.testCase.pickle.steps, async step => {
+      await this.runStepHooks(step, true)
       await this.aroundTestStep(() => this.runStep(step))
+      await this.runStepHooks(step, false)
     })
   }
 }
