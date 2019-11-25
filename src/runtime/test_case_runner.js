@@ -35,6 +35,8 @@ export default class TestCaseRunner {
       attach: ::attachmentManager.create,
       parameters: worldParameters,
     })
+    this.beforeStepHookDefinitions = this.getBeforeStepHookDefinitions()
+    this.afterStepHookDefinitions = this.getAfterStepHookDefinitions()
     this.beforeHookDefinitions = this.getBeforeHookDefinitions()
     this.afterHookDefinitions = this.getAfterHookDefinitions()
     this.maxTestStepIndex =
@@ -113,6 +115,18 @@ export default class TestCaseRunner {
     )
   }
 
+  getBeforeStepHookDefinitions() {
+    return this.supportCodeLibrary.beforeTestStepHookDefinitions.filter(
+      hookDefinition => hookDefinition.appliesToTestCase(this.testCase)
+    )
+  }
+
+  getAfterStepHookDefinitions() {
+    return this.supportCodeLibrary.afterTestStepHookDefinitions.filter(
+      hookDefinition => hookDefinition.appliesToTestCase(this.testCase)
+    )
+  }
+
   getStepDefinitions(step) {
     return this.supportCodeLibrary.stepDefinitions.filter(stepDefinition =>
       stepDefinition.matchesStepName(step.text)
@@ -151,9 +165,11 @@ export default class TestCaseRunner {
     }
   }
 
-  async aroundTestStep(runStepFn) {
+  startStep() {
     this.emit('test-step-started', { index: this.testStepIndex })
-    const testStepResult = await runStepFn()
+  }
+
+  finishStep(testStepResult) {
     if (testStepResult.duration) {
       this.result.duration += testStepResult.duration
     }
@@ -168,6 +184,44 @@ export default class TestCaseRunner {
       result: testStepResult,
     })
     this.testStepIndex += 1
+  }
+
+  async aroundTestHook(runStepFn) {
+    this.startStep()
+    const testStepResult = await runStepFn()
+    this.finishStep(testStepResult)
+  }
+
+  async aroundTestStep(runStepFn, step = null) {
+    this.startStep()
+    let stepAfterHooksResult
+    let testStepResult
+    const stepBeforeHooksResult = await this.runStepHooks(step, true)
+    if (stepBeforeHooksResult.status !== Status.FAILED) {
+      testStepResult = await runStepFn()
+      if (testStepResult.status === Status.PASSED) {
+        stepAfterHooksResult = await this.runStepHooks(step, false)
+      }
+    }
+    let cumulatedStepResult = stepBeforeHooksResult
+    if (testStepResult) {
+      cumulatedStepResult = testStepResult
+      if (stepBeforeHooksResult.duration !== undefined) {
+        cumulatedStepResult.duration += stepBeforeHooksResult.duration
+      }
+    }
+    if (stepAfterHooksResult) {
+      if (stepAfterHooksResult.duration !== undefined) {
+        cumulatedStepResult.duration += stepAfterHooksResult.duration
+      }
+      if (this.shouldUpdateStatus(stepAfterHooksResult)) {
+        cumulatedStepResult.status = stepAfterHooksResult.status
+      }
+      if (stepAfterHooksResult.exception) {
+        cumulatedStepResult.exception = stepAfterHooksResult.exception
+      }
+    }
+    this.finishStep(cumulatedStepResult)
   }
 
   async run() {
@@ -220,10 +274,48 @@ export default class TestCaseRunner {
 
   async runHooks(hookDefinitions, hookParameter, isBeforeHook) {
     await Promise.each(hookDefinitions, async hookDefinition => {
-      await this.aroundTestStep(() =>
+      await this.aroundTestHook(() =>
         this.runHook(hookDefinition, hookParameter, isBeforeHook)
       )
     })
+  }
+
+  async runStepHooks(step, isBeforeHook) {
+    const status =
+      this.result.status === Status.FAILED ? Status.SKIPPED : this.result.status
+    const stepHooksResult = { status: status }
+    if (step) {
+      const stepInfo = {
+        text: step.text,
+        arguments: step.arguments,
+        location: Object.assign({ uri: this.testCase.uri }, step.locations[0]),
+      }
+      let stepHooks = []
+      if (isBeforeHook) {
+        stepHooks = this.beforeStepHookDefinitions
+      } else {
+        stepHooks = this.afterStepHookDefinitions
+      }
+      await Promise.each(stepHooks, async stepHook => {
+        if (this.isSkippingSteps()) {
+          stepHooksResult.status = Status.SKIPPED
+          return
+        }
+        const stepHookResult = await this.invokeStep(null, stepHook, stepInfo)
+        if (this.shouldUpdateStatus(stepHookResult)) {
+          stepHooksResult.status = stepHookResult.status
+        }
+        if (stepHookResult.exception) {
+          stepHooksResult.exception = stepHookResult.exception
+        }
+        if (stepHookResult.duration) {
+          stepHooksResult.duration = stepHooksResult.duration
+            ? stepHooksResult.duration + stepHookResult.duration
+            : stepHookResult.duration
+        }
+      })
+    }
+    return stepHooksResult
   }
 
   async runStep(step) {
@@ -243,7 +335,7 @@ export default class TestCaseRunner {
 
   async runSteps() {
     await Promise.each(this.testCase.pickle.steps, async step => {
-      await this.aroundTestStep(() => this.runStep(step))
+      await this.aroundTestStep(() => this.runStep(step), step)
     })
   }
 }

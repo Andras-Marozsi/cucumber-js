@@ -12,6 +12,7 @@ import { isFileNameInCucumber } from '../stack_trace_filter'
 import StepDefinition from '../models/step_definition'
 import TestCaseHookDefinition from '../models/test_case_hook_definition'
 import TestRunHookDefinition from '../models/test_run_hook_definition'
+import TestStepHookDefinition from '../models/test_step_hook_definition'
 import validateArguments from './validate_arguments'
 
 export function buildTestCaseHookDefinition({ options, code, cwd }) {
@@ -28,6 +29,27 @@ export function buildTestCaseHookDefinition({ options, code, cwd }) {
     location: formatLocation({ line, uri }),
   })
   return new TestCaseHookDefinition({
+    code,
+    line,
+    options,
+    uri,
+  })
+}
+
+export function buildTestStepHookDefinition({ options, code, cwd }) {
+  if (typeof options === 'string') {
+    options = { tags: options }
+  } else if (typeof options === 'function') {
+    code = options
+    options = {}
+  }
+  const { line, uri } = getDefinitionLineAndUri(cwd)
+  validateArguments({
+    args: { code, options },
+    fnName: 'defineTestStepHook',
+    location: formatLocation({ line, uri }),
+  })
+  return new TestStepHookDefinition({
     code,
     line,
     options,

@@ -6,6 +6,7 @@ import {
   buildStepDefinitionConfig,
   buildStepDefinitionFromConfig,
   buildTestCaseHookDefinition,
+  buildTestStepHookDefinition,
   buildTestRunHookDefinition,
 } from './build_helpers'
 import { wrapDefinitions } from './finalize_helpers'
@@ -16,8 +17,10 @@ export class SupportCodeLibraryBuilder {
       defineParameterType: this.defineParameterType.bind(this),
       After: this.defineTestCaseHook('afterTestCaseHookDefinitions'),
       AfterAll: this.defineTestRunHook('afterTestRunHookDefinitions'),
+      AfterStep: this.defineTestStepHook('afterTestStepHookDefinitions'),
       Before: this.defineTestCaseHook('beforeTestCaseHookDefinitions'),
       BeforeAll: this.defineTestRunHook('beforeTestRunHookDefinitions'),
+      BeforeStep: this.defineTestStepHook('beforeTestStepHookDefinitions'),
       defineStep: this.defineStep.bind(this),
       defineSupportCode: util.deprecate(fn => {
         fn(this.methods)
@@ -53,6 +56,17 @@ export class SupportCodeLibraryBuilder {
   defineTestCaseHook(collectionName) {
     return (options, code) => {
       const hookDefinition = buildTestCaseHookDefinition({
+        options,
+        code,
+        cwd: this.cwd,
+      })
+      this.options[collectionName].push(hookDefinition)
+    }
+  }
+
+  defineTestStepHook(collectionName) {
+    return (options, code) => {
+      const hookDefinition = buildTestStepHookDefinition({
         options,
         code,
         cwd: this.cwd,
@@ -105,8 +119,10 @@ export class SupportCodeLibraryBuilder {
     this.options = _.cloneDeep({
       afterTestCaseHookDefinitions: [],
       afterTestRunHookDefinitions: [],
+      afterTestStepHookDefinitions: [],
       beforeTestCaseHookDefinitions: [],
       beforeTestRunHookDefinitions: [],
+      beforeTestStepHookDefinitions: [],
       defaultTimeout: 5000,
       definitionFunctionWrapper: null,
       stepDefinitionConfigs: [],

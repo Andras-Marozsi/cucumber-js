@@ -29,7 +29,9 @@ describe('TestCaseRunner', () => {
     }
     this.supportCodeLibrary = {
       afterTestCaseHookDefinitions: [],
+      afterTestStepHookDefinitions: [],
       beforeTestCaseHookDefinitions: [],
+      beforeTestStepHookDefinitions: [],
       defaultTimeout: 5000,
       stepDefinitions: [],
       parameterTypeRegistry: {},
